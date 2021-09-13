@@ -1,0 +1,221 @@
+---
+title: "Linear Regression Modeling of Police Shootings"
+author: "Jordan Tran"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+# knit options
+knitr::opts_chunk$set(echo = F,
+                      results = 'markup',
+                      fig.width = 4,
+                      fig.height = 3,
+                      fig.align = 'center',
+                      message = F,
+                      warning = F)
+
+# packages
+library(MASS)
+library(leaps)
+library(tidyverse)
+library(modelr)
+library(tidymodels)
+library(faraway)
+```
+# Dataset
+## Sources 
+
+__Demographic data__ is from the 2014 Census
+
+__Expenditure data__ is from California State Controller City Financial Transactions Report
+
+__Police shooting data__ is from the Washington Post's database
+```{r , echo = FALSE}
+# solution
+policeshooting_nodeaths <- read.csv(file = 'data/complete_county_df2.csv')
+policeshootings_withdeaths <- read.csv(file = 'data/complete_county_df3.csv')
+policeshooting_nodeaths_clean <- subset(policeshooting_nodeaths, select = -c(Count, Police_Funding, Population, County, X,CommunityDev ))
+policeshootings_withdeaths_clean <- subset(policeshootings_withdeaths, select = -c(Count, Police_Funding,
+                                                                                   Population, County, X,CommunityDev ))[, c(8, 4, 1, 2, 6, 3, 7, 5,9)]
+head(policeshootings_withdeaths_clean)
+```
+## Variables
+
+__ShootingRatio__ - Total Police Shooting Victims divided by County's Population
+
+__Population_per_Square_Mile__ - Population average per square mile of County
+
+__College_Education__ - Percentage of County Population with a Bachelor's Degree or Higher
+
+__Minority__ - Percentage of County Population that is not White
+
+__Below_Poverty__ - Percentage of County Population that is below poverty line
+
+__IncomePerCapita__ - Income per Capita of County Population
+
+__IncomeMedian__ - Median income of County Population
+
+__Police_Funding_Per_Person__ - Total Police Expenditures of County divided by County's Population
+
+__CommunityDev_Per_Person__ - Total Community Development Expenditures of County divided by County's Population
+
+# Model Selection
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+# Response vs Potential Predictors
+policeshooting_nodeaths_clean %>%
+  pivot_longer(cols = c(College_Education, Below_Poverty, Minority, Police_Funding_Per_Person, CommunityDev_Per_Person, IncomeMedian, IncomePerCapita, Population_per_Square_Mile)) %>%
+  ggplot(aes(x = value, y = ShootingRatio)) +
+  facet_wrap(~ name, scales = 'free_x') +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y ~ x', se = F, span = 1)
+```
+```{r fig.align="center",fig.width = 5, fig.height= 5}
+#See what is skewed
+stripchart(data.frame(scale(policeshooting_nodeaths_clean)), method ="jitter", las=2,
+vertical=TRUE)
+```
+```{r , echo = FALSE}
+require(leaps)
+#Find default search strategy
+b <- regsubsets(ShootingRatio~ College_Education + Minority + Police_Funding_Per_Person + Below_Poverty + IncomeMedian + CommunityDev_Per_Person +IncomePerCapita + Population_per_Square_Mile,data=policeshooting_nodeaths_clean)
+rs <- summary(b)
+rs$which
+```
+```{r , echo = FALSE}
+#Want to minimize AIC
+AIC <- 50*log(rs$rss/50) + (2:8)*2
+plot(AIC ~ I(1:8), ylab="AIC", xlab="Number of Predictors")
+```
+```{r , echo = FALSE}
+plot(2:9,rs$adjr2,xlab="No. of Parameters",ylab="Adjusted R-square")
+```
+```{r , echo = FALSE}
+#Want small p and CP around or less than p
+plot(2:9,rs$cp,xlab="No. of Parameters",ylab="Cp Statistic")
+abline(0,1)
+```
+```{r , echo = FALSE}
+# Linear Regression Model
+policefit1 <- lm(ShootingRatio ~ College_Education + Minority + Police_Funding_Per_Person + Below_Poverty, data=policeshooting_nodeaths_clean)
+summary(policefit1)
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+augment(policefit1, policeshooting_nodeaths_clean) %>%
+  pivot_longer(cols = c(.fitted, College_Education, Minority, Police_Funding_Per_Person, Below_Poverty)) %>%
+  ggplot(aes(y = .resid, x = value)) +
+  facet_wrap(~ name, scales = 'free_x') +
+  geom_point() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_smooth(method = 'loess', formula = 'y ~ x', se = F, span = 1)
+```
+
+```{r , echo = FALSE}
+#The Box–Cox method is a popular way to determine a transformation on the
+#response. It is designed for strictly positive responses and chooses the transformation
+#to find the best fit to the data
+boxcox(policefit1, plotit=T)
+boxcox(policefit1, plotit=T, lambda=seq(-.5,.5,by=0.1))
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+# Response vs Potential Predictors
+policeshooting_nodeaths_clean %>%
+  pivot_longer(cols = c(College_Education, Below_Poverty, Minority, Police_Funding_Per_Person, CommunityDev_Per_Person, IncomeMedian, IncomePerCapita, Population_per_Square_Mile)) %>%
+  ggplot(aes(x = value, y = log(ShootingRatio))) +
+  facet_wrap(~ name, scales = 'free_x') +
+  geom_point() +
+  geom_smooth(method = 'loess', formula = 'y ~ x', se = F, span = 1)
+```
+```{r , echo = FALSE}
+require(leaps)
+b <- regsubsets(log(ShootingRatio)~ College_Education + Minority + Police_Funding_Per_Person + Below_Poverty + IncomeMedian + CommunityDev_Per_Person +IncomePerCapita + Population_per_Square_Mile,data=policeshooting_nodeaths_clean)
+rs <- summary(b)
+rs$which
+```
+```{r , echo = FALSE}
+AIC <- 50*log(rs$rss/50) + (2:8)*2
+plot(AIC ~ I(1:8), ylab="AIC", xlab="Number of Predictors")
+```
+```{r , echo = FALSE}
+plot(2:9,rs$adjr2,xlab="No. of Parameters",ylab="Adjusted R-square")
+```
+```{r , echo = FALSE}
+plot(2:9,rs$cp,xlab="No. of Parameters",ylab="Cp Statistic")
+abline(0,1)
+```
+```{r , echo = FALSE}
+# Linear Regression Model
+policefit2 <- lm(log(ShootingRatio) ~ College_Education + Minority + Police_Funding_Per_Person + Below_Poverty  + CommunityDev_Per_Person, data=policeshooting_nodeaths_clean)
+summary(policefit2)
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+#Constant Variance fixed?
+augment(policefit2, policeshooting_nodeaths_clean) %>%
+  pivot_longer(cols = c(.fitted, College_Education, Minority, Police_Funding_Per_Person, Below_Poverty, CommunityDev_Per_Person)) %>%
+  ggplot(aes(y = .resid, x = value)) +
+  facet_wrap(~ name, scales = 'free_x') +
+  geom_point() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_smooth(method = 'loess', formula = 'y ~ x', se = F, span = 1)
+```
+```{r , echo = FALSE}
+augment(policefit2, policeshooting_nodeaths_clean) %>%
+  ggplot(aes(sample = .resid)) +
+  geom_qq() +
+  geom_qq_line()
+```
+
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+#Influential Points
+p_caseinf <- augment(policefit2, policeshooting_nodeaths) %>%
+  pivot_longer(cols = c(.resid, .hat, .cooksd)) %>%
+  ggplot(aes(x = County, y = value)) +
+  facet_wrap(~ name, scales = 'free_y', nrow = 3) + # looks better with vertical faceting
+  geom_point() +
+  geom_hline(aes(yintercept = 0)) + # add line at zero
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.25)) + # rotates and aligns labels
+  labs(x = '', y = '') 
+
+p_caseinf
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+#Influential Points
+h <- lm.influence(policefit2)$hat
+names(h) <- policeshooting_nodeaths$County
+rev(sort(h))
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+#Dropped SF. Current Model is still best
+b<-regsubsets(log(ShootingRatio)~.,data=policeshooting_nodeaths_clean[-c(29),])
+rs <- summary(b)
+rs$which[which.max(rs$adjr),]
+```
+```{r , echo = FALSE}
+# Linear Regression Model
+#Reduced Model is better. Police Funding has no association when other variables are taken in account?
+policefit_test <- lm(log(ShootingRatio) ~ College_Education + Minority + Below_Poverty   + CommunityDev_Per_Person, data=policeshooting_nodeaths_clean)
+anova(policefit2,policefit_test)
+summary(policefit_test)
+cor(policeshooting_nodeaths_clean)
+#Plot commun and police fund and shooting ratio. scatter x y funding. color shooting ratio
+#take out other predictors and look at partial residuals.
+#maybe include pop per square mile
+#include all predictors. interpret
+#Read Chapter 11
+# Applied Stats, Biostats, UC Davis, CSU Boulder, Oregon State, Consulting Req/Group, Katie Coburn, CS Programs (Machine learning, deep learning)
+```
+```{r fig.align="center",fig.width = 10, fig.height= 6}
+augment(policefit_test, policeshooting_nodeaths_clean) %>%
+  pivot_longer(cols = c(.fitted, College_Education, Minority, Below_Poverty, CommunityDev_Per_Person)) %>%
+  ggplot(aes(y = .resid, x = value)) +
+  facet_wrap(~ name, scales = 'free_x') +
+  geom_point() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_smooth(method = 'loess', formula = 'y ~ x', se = F, span = 1)
+```
+```{r , echo = FALSE}
+#T distribution?
+augment(policefit_test, policeshooting_nodeaths_clean) %>%
+  ggplot(aes(sample = .resid)) +
+  geom_qq() +
+  geom_qq_line()
+```
